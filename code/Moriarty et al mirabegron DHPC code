@@ -1,0 +1,213 @@
+*Specify working directiory
+
+cd ""
+
+*Open data file
+use ".dta", clear
+
+*Label variables
+label variable practice "GP practice identifier"
+label variable total_patients2014 "Number of practice registered patients in 2014"
+label variable total_gp_fte "Number of GP full time equivalents in practice in 2014"
+label variable imd_decile "Decile of index of multiple deprivation (2015) of practice postcode"
+label variable miraitems "Number of mirabegron items prescribed per month by each practice"
+label variable oabitems "Number of overactive bladder drugs items prescribed per month by each practice"
+label variable DEM20142015Prevalenceperc "Prevalence of dementia in practice, QOF 14/15"
+label variable HYP20142015Prevalenceperc "GP practice identifier"
+label variable period "Time period (month and year)"
+label variable month "Number of months since beginning of 2013"
+label variable totalwithin "Total months within 12m of Sep15 with >100 total items"
+label variable p_mira "Mirabegron as a proportion of OAB drug items"
+label variable u0 "Practice level random effect for month0915"
+label variable u1 "Practice level random effect for monthpost"
+label variable u2 "Practice level random effect for intpost"
+label variable u3 "Practice level random effect for _cons"
+label variable u0se "Std error for practice level random effect for month0915"
+label variable u1se "Std error for practice level random effect for monthpost"
+label variable u2se "Std error for practice level random effect for intpost"
+label variable u3se "Std error for practice level random effect for _cons"
+label variable qof_1415_overall "Percentage overall QOF performance 14/15"
+label variable gp45plus10 "Percentage of GPs aged 45+ 2014 (units indicate +/-10%)"
+label variable patientfemale10 "Percentage of female patients at practice 2014 (units indicate +/-10%)"
+label variable patient65plus10 "Percentage of patients aged 65+ 2014 (units indicate +/-10%)"
+label variable gpfemale10 "Percentage of female GPs at practice 2014 (units indicate +/-10%)"
+label variable anyreg "GP registrar at practice (2014)"
+
+*Generate indicator variables
+
+egen pickone=tag(month practice) 
+egen pickone_t=tag(month) 
+egen pickone_p=tag(practice)
+
+*Standardised rate per practice per month
+
+bysort month: egen total_oab=sum(oabitems)
+bysort month: egen total_mira=sum(miraitems)
+gen prop_oab=total_mira/total_oab
+
+
+gen stand_p_mira=p_mira/prop_oab
+
+
+dotplot stand_p_mira  if(month>=26 & month<=38),  over(month)	xline(32) center msymbol(circle_hollow) msize(vsmall) ylab(0(2)14)  xtitle("") ytitle("Standardised prescribing ratio") ///
+	 xlabel(26 "Mar 15" 28 "May 15" 30 "July 15" 32 ///
+	"Sep 15" 34 "Nov 15" 36 "Jan 15" 38 "Mar 16"  ///
+	,labsize(medsmall)) text(11.5 30.5 "DHPC issued", size(medium)) graphregion(color(white))
+
+/*SCV*/
+forvalues i=12/50{
+	glm miraitems if month==`i' & oabitems!=0, family(binomial oabitems) link(logit)
+	predict mu_mira_`i'  if month==`i' 
+}
+
+gen mu_mira=.
+
+forvalues i=12/50{
+	replace  mu_mira=mu_mira_`i' if month==`i'
+}
+
+drop mu_mira_*
+
+count if  mu_mira==. &  month<=50 /*0* missing -everyone got something predicted*/
+
+
+bysort practice month : egen obs=total(miraitems) if month<=50
+bysort practice month : egen exp=total(mu_mira) if month<=50
+
+sort practice month
+
+gen term=[(obs-exp)/exp]^2-(1/exp) if month<=50 
+
+
+gen win_oab_term=term
+
+forvalues i=12/50{
+	qui: summ win_oab_term if month==`i' , d
+	gen low5=r(p5)
+	gen upp95=r(p95) 
+	replace win_oab_term=. if win_oab_term<low5 & month==`i' 
+	replace win_oab_term=. if win_oab_term>upp95 & month==`i' 
+	drop low5 upp95
+}
+
+bysort month: egen scv_term=total(win_oab_term) if month<=50 
+bysort month: egen n_practice=count(practice) if win_oab_term!=.
+
+gen sigma2=(scv_term)*100/n_practice  if month<=50 
+
+gen divider6m=.
+recode divider6m .=0 if month<=31 & month>=26
+recode divider6m .=1 if month>=33 & month<=38
+
+ranksum sigma2 if pickone_t==1, by(divider6m)
+
+by divider6m, sort: sum sigma2 if pickone_t==1,d
+
+*Results for decile plots
+table month, contents(p10 p_mira p20 p_mira p30 p_mira p40 p_mira p50 p_mira)
+table month, contents(p60 p_mira p70 p_mira p80 p_mira p90 p_mira )
+
+sort practice month
+gen avg_miraprop=(miraprop+miraprop[_n-1]+miraprop[_n-2]+miraprop[_n-3]+miraprop[_n-4]+miraprop[_n-5])/6 if practice==practice[_n-5]
+gen temp_avg_miraprop_32=avg_miraprop if month==32
+egen avg_miraprop_32=max(temp_avg_miraprop_32), by(practice)
+drop temp_avg_miraprop_32
+gen ratio_miraprop=avg_miraprop/avg_miraprop_32
+
+table month, contents(p1 ratio_miraprop p2 ratio_miraprop p3 ratio_miraprop p4 ratio_miraprop p5 ratio_miraprop )
+table month, contents(p6 ratio_miraprop p7 ratio_miraprop p8 ratio_miraprop p9 ratio_miraprop  )
+table month, contents(p10 ratio_miraprop p20 ratio_miraprop p30 ratio_miraprop p40 ratio_miraprop p50 ratio_miraprop)
+table month, contents(p60 ratio_miraprop p70 ratio_miraprop p80 ratio_miraprop p90 ratio_miraprop )
+table month, contents(p91 ratio_miraprop p92 ratio_miraprop p93 ratio_miraprop p94 ratio_miraprop p95 ratio_miraprop )
+table month, contents(p96 ratio_miraprop p97 ratio_miraprop p98 ratio_miraprop p99 ratio_miraprop  )
+
+
+*Segmented regression*
+
+gen month0915=month-33
+/*Combined model - separate slope and intercept*/
+gen monthpre=month0915
+replace monthpre=0 if month>=33
+gen monthpost=month0915
+replace monthpost=0 if month<33
+
+gen intpre=1
+replace intpre=0 if month>=33
+gen intpost=1
+replace intpost=0 if month<33
+gen month2=month(period)
+replace month2=month2-9
+
+mixed p_mira month2 month0915 monthpost intpost || practice: month0915 monthpost intpost, cov(unstr) res(ar 2, t(month))
+
+/*predict u0 u1 u2 u3, reffects
+predict u0se u1se u2se u3se, reses*/
+
+gen ypred = (.0830042) + (0.0029383)*month0915 + (-0.0003594)*monthpost +  (-0.0002332)*intpost + month2*0.0000336
+gen ycf = (.0830042) + (0.0029383)*month0915 + month2*0.0000336
+gen ypredi = (.0830042+u3) + (0.0029383+u0)*month0915 + (-0.0003594+u1)*monthpost +  (-0.0002332+u2)*intpost + month2*0.0000336
+gen ycfi = (.0830042+u3) + (0.0029383+u0)*month0915 + month2*0.0000336
+
+label variable ypred "Overall estimated with DHPC"
+label variable ycf "Overall estimated without DHPC"
+label variable ypredi "Individual practice estimated with DHPC"
+label variable ycfi "Individual practice estimated without DHPC"
+
+gen newsigintpost=  -0.0002332 + u2 + 1.96*u2se >= 0
+gen newsigmonthpost=  -0.0003594 + u1 + 1.96*u1se >= 0
+replace newsigintpost=2 if -0.0002332 + u2 - 1.96*u2se > 0
+replace newsigmonthpost=2 if -0.0003594 + u1 - 1.96*u1se > 0
+
+gen newredintpost=newsigintpost==0
+gen newredmonthpost=newsigmonthpost==0
+
+label define newredint 0 "No decrease intercept" 1 "Decrease intercept"
+label define newredmonth 0 "No decrease slope" 1 "Decrease slope"
+label values newredmonthpost newredmonth
+label values newredintpost newredint
+
+label variable newredmonthpost "Significant decrease in slope post-DHPC"
+label variable newredintpost "Significant decrease in intercept post-DHPC"
+
+egen mean_ypredi=mean(ypredi), by(month)
+egen mean_ycfi=mean(ycfi), by(month)
+egen mean_ypredi2=mean(ypredi), by(newredmonthpost newredintpost month)
+egen mean_ycfi2=mean(ycfi), by(newredmonthpost newredintpost month)
+
+egen pickone_obs2=tag(newredmonthpost newredintpost month)
+egen mean_obs=mean(p_mira), by(month)
+
+twoway (lfit ycfi  month if  month0915<=0, lcolor(ebblue) ) (lfit ycfi month if  ///
+ month0915>=0, clpattern(shortdash) lcolor(ebblue)) (lfit ypredi month if month0915>=0 , ///
+lcolor(cranberry)), graphregion(color(white)) by(newredmonthpost newredintpost, graphregion(color(gs15)) compact ///
+note("", size(vsmall))) subtitle(, ring(0) pos(11) nobexpand size(small)) ylabel(0 "0" 0.1 "10" 0.2 "20" 0.3 "30") ///
+xtitle("Month") ytitle("Percentage of mirabegron") xlabel(18 "Jul 14" 32 "Sep 15" 48 "Jan 17" ,labsize(medsmall)) ///
+legend(holes(2) label(1 "Pre-DHPC") label(2 "Estimated values without DHPC") label(3 "Estimated values with DHPC") ///
+size(small) margin(zero))
+
+graph save Graph "Change in slope - figure S1.gph", replace
+graph export "Change in slope - figure S1.tif", as(tif) replace
+
+twoway (lfit ycfi month if  month0915<=0, lcolor(ebblue) lwidth(medthin)) (lfit ycfi month if  ///
+month0915>=0, clpattern(shortdash) lwidth(medthin) lcolor(ebblue)) (lfit ypredi month if month0915>=0, ///
+lcolor(cranberry) lwidth(medthin)) (scatter mean_obs month if pickone_t==1, msymbol(circle_hollow) mlwidth(thin) mcolor(gs6) msize(medsmall)), graphregion(color(white)) ylabel(0 "0" 0.05 "5" 0.1 "10" 0.15 "15") ///
+xtitle("Month") ytitle("Percentage of mirabegron") xlabel(18 "July 14" 32 "September 15" 48 "January 17" ,labsize(medsmall)) ///
+legend(label(1 "Pre-DHPC") label(2 "Estimated values without DHPC") label(3 "Estimated values with DHPC") label(4 "Observed values") ///
+size(small) margin(none)) 
+
+graph save Graph "Overall ITS-figure 4.gph", replace
+graph export "Overall ITS-figure 4.tif", as(tif) replace
+
+foreach covar in gp45plus10 patientfemale10 patient65plus10 imd_decile HYP20142015Prevalenceperc DEM20142015Prevalenceperc qof_1415_overall total_gp_fte2014 anyreg total_patients2014 gpfemale10 {
+egen std`covar'=std(`covar')
+}
+
+
+
+logistic newredintpost stdtotal_gp_fte2014 stdgpfemale10 stdgp45plus10 stdanyreg stdtotal_patients2014 stdpatientfemale10 stdpatient65plus10 stdqof_1415_overall stdHYP20142015Prevalenceperc stdDEM20142015Prevalenceperc stdimd_decile if pickone_p==1
+logistic newredmonthpost stdtotal_gp_fte2014 stdgpfemale10 stdgp45plus10 stdanyreg stdtotal_patients2014 stdpatientfemale10 stdpatient65plus10 stdqof_1415_overall stdHYP20142015Prevalenceperc stdDEM20142015Prevalenceperc stdimd_decile if pickone_p==1
+
+*Repeat excluding 
+logistic newredintpost stdtotal_gp_fte2014 stdgpfemale10 stdgp45plus10 stdanyreg stdtotal_patients2014 stdpatientfemale10 stdpatient65plus10 stdimd_decile if pickone_p==1
+logistic newredmonthpost stdtotal_gp_fte2014 stdgpfemale10 stdgp45plus10 stdanyreg stdtotal_patients2014 stdpatientfemale10 stdpatient65plus10 stdimd_decile if pickone_p==1
+
